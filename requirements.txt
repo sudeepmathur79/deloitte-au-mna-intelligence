@@ -1,0 +1,2 @@
+# Runtime uses Python standard library only.
+# This file is retained so future research connectors can add pinned dependencies without changing the workflow contract.
