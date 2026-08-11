@@ -2,8 +2,8 @@ name: Daily Deloitte Australia M&A Briefing
 
 on:
   schedule:
-    # 7:05am Sydney time; timezone-aware so AEDT/AEST changes are handled automatically.
-    - cron: '5 7 * * *'
+    # Research runs at 6:45am Sydney time so the ChatGPT delivery layer can deliver the finished briefing at 7:00am.
+    - cron: '45 6 * * *'
       timezone: 'Australia/Sydney'
   workflow_dispatch:
     inputs:
@@ -38,12 +38,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/run_briefing.py
-
-      - name: Send Telegram briefing
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python3 scripts/telegram_send.py
 
       - name: Commit briefing
         run: |
