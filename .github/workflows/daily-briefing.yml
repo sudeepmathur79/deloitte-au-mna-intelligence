@@ -39,6 +39,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python3 scripts/run_briefing.py
 
+      - name: Send Telegram briefing
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python3 scripts/telegram_send.py
+
       - name: Commit briefing
         run: |
           git config user.name 'deloitte-au-mna-intelligence[bot]'
