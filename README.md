@@ -10,7 +10,8 @@ Every morning at **7:05 am Australia/Sydney**, the GitHub Actions workflow:
 2. Deduplicates and ranks the source set.
 3. Uses **GitHub Models** for synthesis, authenticated with the workflow's built-in `GITHUB_TOKEN`.
 4. Produces a dated Markdown briefing in `briefings/YYYY-MM-DD.md`.
-5. Commits the briefing back to this repository.
+5. Optionally sends a concise, mobile-friendly version to Telegram.
+6. Commits the briefing back to this repository.
 
 The architecture is intentionally inspired by the modular research-ops approach used by the open-source [AI-News-Briefing](https://github.com/hoangsonww/AI-News-Briefing) project, but this repository is purpose-built for Australian M&A and the user's Deloitte AD lens rather than copied from it.
 
@@ -47,6 +48,9 @@ AI appears only when it is materially relevant to the transaction, operating mod
 ### Historical intelligence
 Daily reports are committed to `briefings/`, creating a searchable M&A intelligence archive that can later support weekly/monthly trend analysis.
 
+### Telegram delivery
+The workflow can send the briefing to a Telegram chat using the official Telegram Bot API. The bot token and chat ID are stored as GitHub Actions repository secrets and are never committed to source code.
+
 ## Schedule
 
 The workflow uses GitHub Actions' timezone-aware schedule with `Australia/Sydney`, so the 7:05 am run follows Sydney daylight-saving changes automatically. GitHub supports IANA timezone strings for scheduled workflows. See the [GitHub Actions schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule).
@@ -56,6 +60,17 @@ The workflow uses GitHub Actions' timezone-aware schedule with `Australia/Sydney
 Open **Actions → Daily Deloitte Australia M&A Briefing → Run workflow**.
 
 The workflow also supports a `lookback_days` input for deeper catch-up research.
+
+## Telegram setup
+
+Create a Telegram bot with BotFather, start a chat with the bot, and add these repository Actions secrets:
+
+- `TELEGRAM_BOT_TOKEN` — the token issued by BotFather
+- `TELEGRAM_CHAT_ID` — the chat/channel/group ID that should receive the briefing
+
+The delivery step is optional: if either secret is absent, the research briefing still runs and is archived normally.
+
+Telegram's Bot API `sendMessage` endpoint is used for delivery. Keep the bot token secret and do not place it in source files or workflow YAML.
 
 ## Model
 
@@ -69,6 +84,7 @@ The default model is configurable in the workflow environment. It currently uses
 ├── config/sources.yaml
 ├── prompts/briefing.md
 ├── scripts/run_briefing.py
+├── scripts/telegram_send.py
 ├── briefings/
 ├── requirements.txt
 └── README.md
@@ -82,5 +98,5 @@ The default model is configurable in the workflow environment. It currently uses
 - Account-level opportunity tracker
 - PE sponsor / portfolio tracker
 - Deloitte competitor intelligence
-- Optional email / Teams / Slack delivery
+- Rich Telegram formatting and links
 - Evaluation harness to score factuality, source quality, relevance and AD usefulness
