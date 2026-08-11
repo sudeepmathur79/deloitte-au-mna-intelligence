@@ -1,0 +1,52 @@
+name: Daily Deloitte Australia M&A Briefing
+
+on:
+  schedule:
+    # 7:05am Sydney time; timezone-aware so AEDT/AEST changes are handled automatically.
+    - cron: '5 7 * * *'
+      timezone: 'Australia/Sydney'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: 'Research lookback window in days'
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  contents: write
+  models: read
+
+concurrency:
+  group: daily-mna-briefing
+  cancel-in-progress: false
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITHUB_MODEL: openai/gpt-4.1-mini
+      LOOKBACK_DAYS: ${{ inputs.lookback_days || '7' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Generate briefing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/run_briefing.py
+
+      - name: Commit briefing
+        run: |
+          git config user.name 'deloitte-au-mna-intelligence[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add briefings/
+          if git diff --cached --quiet; then
+            echo 'No briefing changes to commit.'
+            exit 0
+          fi
+          git commit -m "Add daily M&A briefing $(date -u +%Y-%m-%d)"
+          git push
