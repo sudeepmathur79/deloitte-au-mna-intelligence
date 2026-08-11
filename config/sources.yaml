@@ -1,0 +1,33 @@
+queries:
+  - 'Australia M&A mergers acquisitions deals'
+  - 'Australia corporate M&A takeover acquisition divestment'
+  - 'Australia private equity acquisition portfolio exit bolt-on'
+  - 'Australia infrastructure investment acquisition superannuation sovereign wealth'
+  - 'Australia resources mining M&A critical minerals copper lithium takeover'
+  - 'Australia financial services M&A bank insurer wealth asset manager acquisition'
+  - 'Australia technology TMT M&A acquisition software telecom data centre'
+  - 'Australia healthcare M&A acquisition private equity'
+  - 'Australia energy utilities renewables M&A acquisition'
+  - 'Australia carve-out divestiture separation M&A'
+  - 'Australia ACCC merger acquisition competition 2026'
+  - 'Australia FIRB foreign investment acquisition 2026'
+  - 'site:deloitte.com/au M&A Australia mergers acquisitions private equity'
+  - 'site:accc.gov.au mergers acquisitions Australia'
+  - 'site:asx.com.au acquisition takeover Australia'
+  - 'Australia M&A Reuters acquisition takeover'
+
+preferred_domains:
+  - reuters.com
+  - deloitte.com
+  - accc.gov.au
+  - asx.com.au
+  - afr.com
+  - theaustralian.com.au
+  - smh.com.au
+  - abc.net.au
+  - capitalbrief.com
+  - streettalk.com.au
+
+max_items_per_query: 8
+max_total_sources: 70
+max_age_days: 7
