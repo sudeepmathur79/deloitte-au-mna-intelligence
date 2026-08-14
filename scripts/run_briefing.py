@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Research -> synthesis -> dated Markdown briefing for Australian M&A."""
+"""Research -> delta synthesis -> dated Markdown briefing for Australian M&A."""
 from __future__ import annotations
 
 import datetime as dt
 import email.utils
+import glob
 import html
 import json
 import os
@@ -28,10 +29,8 @@ def parse_simple_yaml(path: str) -> dict:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        if line == "queries:":
-            section = "queries"; continue
-        if line == "preferred_domains:":
-            section = "preferred_domains"; continue
+        if line == "queries:": section = "queries"; continue
+        if line == "preferred_domains:": section = "preferred_domains"; continue
         if line.startswith("- "):
             value = line[2:].strip().strip("'\"")
             if section == "queries": queries.append(value)
@@ -55,10 +54,9 @@ def strip_html(value: str) -> str:
 def fetch_rss(query: str, limit: int, lookback_days: int) -> list[dict]:
     q = f"{query} when:{lookback_days}d"
     url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": q, "hl": "en-AU", "gl": "AU", "ceid": "AU:en"})
-    req = urllib.request.Request(url, headers={"User-Agent": "Deloitte-AU-MNA-Intelligence/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Deloitte-AU-MNA-Intelligence/2.0"})
     with urllib.request.urlopen(req, timeout=20) as response:
-        data = response.read()
-    root = ET.fromstring(data)
+        root = ET.fromstring(response.read())
     items = []
     for item in root.findall("./channel/item")[:limit]:
         title = strip_html(item.findtext("title", ""))
@@ -66,19 +64,27 @@ def fetch_rss(query: str, limit: int, lookback_days: int) -> list[dict]:
         description = strip_html(item.findtext("description", ""))
         pub = item.findtext("pubDate", "")
         try:
-            published = email.utils.parsedate_to_datetime(pub).isoformat()
+            published = email.utils.parsedate_to_datetime(pub)
         except Exception:
-            published = pub
+            published = dt.datetime.now(dt.timezone.utc)
         source_el = item.find("source")
         source = source_el.text.strip() if source_el is not None and source_el.text else "Google News"
         if title and link:
-            items.append({"title": title, "url": link, "description": description[:900], "published": published, "source": source})
+            items.append({"title": title, "url": link, "description": description[:900], "published": published.isoformat(), "source": source})
     return items
 
 
-def dedupe(items: list[dict], max_total: int) -> list[dict]:
+def dedupe(items: list[dict], max_total: int, preferred: list[str]) -> list[dict]:
     seen, out = set(), []
-    for item in items:
+    now = dt.datetime.now(dt.timezone.utc)
+    def score(item):
+        try:
+            age = (now - dt.datetime.fromisoformat(item["published"]).astimezone(dt.timezone.utc)).total_seconds() / 86400
+        except Exception:
+            age = 7
+        domain_bonus = 1 if any(d in item["url"] for d in preferred) else 0
+        return domain_bonus * 100 - age
+    for item in sorted(items, key=score, reverse=True):
         key = re.sub(r"[^a-z0-9]+", " ", item["title"].lower()).strip()
         if key in seen:
             continue
@@ -95,24 +101,41 @@ def research(lookback_days: int) -> list[dict]:
             all_items.extend(fetch_rss(query, cfg["max_items"], lookback_days))
         except Exception as exc:
             print(f"WARN: query failed: {query}: {exc}", file=sys.stderr)
-    return dedupe(all_items, cfg["max_total"])
+    return dedupe(all_items, cfg["max_total"], cfg["preferred_domains"])
 
 
 def build_context(items: list[dict]) -> str:
+    return "\n\n".join(
+        f"[S{i}] {x['source']} | {x['published']}\nTITLE: {x['title']}\nURL: {x['url']}\nSUMMARY: {x['description']}"
+        for i, x in enumerate(items, 1)
+    )
+
+
+def load_recent_briefings(limit: int = 3) -> str:
+    files = sorted(glob.glob(os.path.join(REPO_ROOT, "briefings", "*.md")), reverse=True)[:limit]
     chunks = []
-    for i, item in enumerate(items, 1):
-        chunks.append(f"[S{i}] {item['source']} | {item['published']}\nTITLE: {item['title']}\nURL: {item['url']}\nSUMMARY: {item['description']}")
+    for path in files:
+        try:
+            text = open(path, encoding="utf-8").read()
+            chunks.append(f"--- PRIOR BRIEFING: {os.path.basename(path)} ---\n{text[:18000]}")
+        except Exception as exc:
+            print(f"WARN: prior briefing unavailable: {path}: {exc}", file=sys.stderr)
     return "\n\n".join(chunks)
 
 
-def call_github_model(context: str) -> str:
+def call_github_model(context: str, prior: str) -> str:
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise RuntimeError("GITHUB_TOKEN is not available")
     model = os.environ.get("GITHUB_MODEL", "openai/gpt-4.1")
     system = open(PROMPT_PATH, encoding="utf-8").read()
     today = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%A, %d %B %Y")
-    user = f"Today is {today}.\n\nResearch items follow. Use only these items as factual evidence.\n\n{context}\n\nGenerate the complete briefing now."
+    user = (
+        f"Today is {today}.\n\nCURRENT RESEARCH ITEMS — these are the only factual evidence for today's events:\n\n{context}\n\n"
+        "RECENT PRIOR BRIEFINGS — memory only, not new evidence. Use them to suppress repetition and identify changes.\n\n"
+        + (prior or "No prior briefing available.")
+        + "\n\nGenerate the complete DAILY DELTA briefing now. Novelty is more important than completeness."
+    )
     payload = json.dumps({"model": model, "temperature": 0.1, "max_tokens": 7000, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         "https://models.github.ai/inference/chat/completions",
@@ -138,10 +161,10 @@ def call_github_model(context: str) -> str:
 
 
 def add_sources(report: str, items: list[dict]) -> str:
-    source_lines = ["\n\n---\n\n## Research sources gathered"]
+    lines = ["\n\n---\n\n## Research sources gathered"]
     for i, item in enumerate(items, 1):
-        source_lines.append(f"- [S{i}] {item['source']} — {item['title']} — {item['published']} — {item['url']}")
-    return report + "\n" + "\n".join(source_lines) + "\n"
+        lines.append(f"- [S{i}] {item['source']} — {item['title']} — {item['published']} — {item['url']}")
+    return report + "\n" + "\n".join(lines) + "\n"
 
 
 def main() -> int:
@@ -150,7 +173,9 @@ def main() -> int:
     if not items:
         raise RuntimeError("No research items were collected")
     print(f"Collected {len(items)} research items")
-    report = add_sources(call_github_model(build_context(items)), items)
+    prior = load_recent_briefings(3)
+    print(f"Loaded {prior.count('--- PRIOR BRIEFING:')} prior briefings for novelty comparison")
+    report = add_sources(call_github_model(build_context(items), prior), items)
     date_str = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%Y-%m-%d")
     out_dir = os.path.join(REPO_ROOT, "briefings")
     os.makedirs(out_dir, exist_ok=True)
