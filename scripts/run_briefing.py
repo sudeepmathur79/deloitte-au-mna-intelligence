@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import email.utils
 import html
+import json
 import os
 import re
 import sys
@@ -20,13 +21,9 @@ PROMPT_PATH = os.path.join(REPO_ROOT, "prompts", "briefing.md")
 
 
 def parse_simple_yaml(path: str) -> dict:
-    """Tiny parser for the intentionally simple project config; avoids a runtime dependency."""
-    queries = []
-    preferred = []
+    queries, preferred = [], []
     section = None
-    max_items = 8
-    max_total = 70
-    max_age = 7
+    max_items, max_total, max_age = 8, 70, 7
     for raw in open(path, encoding="utf-8"):
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -80,8 +77,7 @@ def fetch_rss(query: str, limit: int, lookback_days: int) -> list[dict]:
 
 
 def dedupe(items: list[dict], max_total: int) -> list[dict]:
-    seen = set()
-    out = []
+    seen, out = set(), []
     for item in items:
         key = re.sub(r"[^a-z0-9]+", " ", item["title"].lower()).strip()
         if key in seen:
@@ -105,32 +101,19 @@ def research(lookback_days: int) -> list[dict]:
 def build_context(items: list[dict]) -> str:
     chunks = []
     for i, item in enumerate(items, 1):
-        chunks.append(
-            f"[S{i}] {item['source']} | {item['published']}\n"
-            f"TITLE: {item['title']}\nURL: {item['url']}\n"
-            f"SUMMARY: {item['description']}"
-        )
+        chunks.append(f"[S{i}] {item['source']} | {item['published']}\nTITLE: {item['title']}\nURL: {item['url']}\nSUMMARY: {item['description']}")
     return "\n\n".join(chunks)
 
 
-def call_github_model(prompt: str, context: str) -> str:
+def call_github_model(context: str) -> str:
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         raise RuntimeError("GITHUB_TOKEN is not available")
-    model = os.environ.get("GITHUB_MODEL", "openai/gpt-4.1-mini")
+    model = os.environ.get("GITHUB_MODEL", "openai/gpt-4.1")
     system = open(PROMPT_PATH, encoding="utf-8").read()
     today = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%A, %d %B %Y")
-    user = (
-        f"Today is {today}.\n\n"
-        "Research items follow. Use only these items as factual evidence.\n\n"
-        + context
-        + "\n\nGenerate the complete briefing now."
-    )
-    payload = (
-        '{"model":' + json_quote(model) + ',"temperature":0.1,"max_tokens":7000,'
-        '"messages":[{"role":"system","content":' + json_quote(system) + '},'
-        '{"role":"user","content":' + json_quote(user) + '}]}'
-    ).encode("utf-8")
+    user = f"Today is {today}.\n\nResearch items follow. Use only these items as factual evidence.\n\n{context}\n\nGenerate the complete briefing now."
+    payload = json.dumps({"model": model, "temperature": 0.1, "max_tokens": 7000, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         "https://models.github.ai/inference/chat/completions",
         data=payload,
@@ -138,13 +121,13 @@ def call_github_model(prompt: str, context: str) -> str:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
         },
         method="POST",
     )
     for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=180) as response:
-                import json
                 data = json.loads(response.read().decode("utf-8"))
             return data["choices"][0]["message"]["content"].strip()
         except Exception:
@@ -152,11 +135,6 @@ def call_github_model(prompt: str, context: str) -> str:
                 raise
             time.sleep(5 * (attempt + 1))
     raise RuntimeError("Model request failed")
-
-
-def json_quote(value: str) -> str:
-    import json
-    return json.dumps(value, ensure_ascii=False)
 
 
 def add_sources(report: str, items: list[dict]) -> str:
@@ -172,10 +150,8 @@ def main() -> int:
     if not items:
         raise RuntimeError("No research items were collected")
     print(f"Collected {len(items)} research items")
-    report = call_github_model("", build_context(items))
-    report = add_sources(report, items)
-    now = dt.datetime.now(ZoneInfo("Australia/Sydney"))
-    date_str = now.strftime("%Y-%m-%d")
+    report = add_sources(call_github_model(build_context(items)), items)
+    date_str = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%Y-%m-%d")
     out_dir = os.path.join(REPO_ROOT, "briefings")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{date_str}.md")
