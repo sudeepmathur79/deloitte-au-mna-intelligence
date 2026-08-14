@@ -2,8 +2,8 @@ name: Daily Deloitte Australia M&A Briefing
 
 on:
   schedule:
-    # Research runs at 6:45am Sydney time so the ChatGPT delivery layer can deliver the finished briefing at 7:00am.
-    - cron: '45 6 * * *'
+    # Temporary validation run at 9:15am Sydney time; restore to 6:45am after validation.
+    - cron: '15 9 * * *'
       timezone: 'Australia/Sydney'
   workflow_dispatch:
     inputs:
