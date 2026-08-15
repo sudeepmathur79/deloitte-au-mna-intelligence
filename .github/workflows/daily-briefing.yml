@@ -1,6 +1,8 @@
 name: Daily Deloitte Australia M&A Briefing
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: '45 6 * * *'
       timezone: 'Australia/Sydney'
