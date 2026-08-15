@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Research -> delta synthesis -> dated Markdown briefing for Australian M&A."""
+"""Research -> local-model delta synthesis -> dated Markdown briefing for Australian M&A."""
 from __future__ import annotations
 
 import datetime as dt
@@ -54,7 +54,7 @@ def strip_html(value: str) -> str:
 def fetch_rss(query: str, limit: int, lookback_days: int) -> list[dict]:
     q = f"{query} when:{lookback_days}d"
     url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": q, "hl": "en-AU", "gl": "AU", "ceid": "AU:en"})
-    req = urllib.request.Request(url, headers={"User-Agent": "Deloitte-AU-MNA-Intelligence/2.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Deloitte-AU-MNA-Intelligence/3.0"})
     with urllib.request.urlopen(req, timeout=20) as response:
         root = ET.fromstring(response.read())
     items = []
@@ -123,11 +123,8 @@ def load_recent_briefings(limit: int = 3) -> str:
     return "\n\n".join(chunks)
 
 
-def call_github_model(context: str, prior: str) -> str:
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise RuntimeError("GITHUB_TOKEN is not available")
-    model = os.environ.get("GITHUB_MODEL", "openai/gpt-4.1")
+def call_local_model(context: str, prior: str) -> str:
+    model = os.environ.get("OLLAMA_MODEL", "qwen3:4b")
     system = open(PROMPT_PATH, encoding="utf-8").read()
     today = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%A, %d %B %Y")
     user = (
@@ -136,28 +133,35 @@ def call_github_model(context: str, prior: str) -> str:
         + (prior or "No prior briefing available.")
         + "\n\nGenerate the complete DAILY DELTA briefing now. Novelty is more important than completeness."
     )
-    payload = json.dumps({"model": model, "temperature": 0.1, "max_tokens": 7000, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}, ensure_ascii=False).encode("utf-8")
+    payload = json.dumps({
+        "model": model,
+        "stream": False,
+        "think": False,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "options": {"temperature": 0.1, "num_ctx": 65536, "num_predict": 7000},
+    }, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
-        "https://models.github.ai/inference/chat/completions",
+        "http://127.0.0.1:11434/api/chat",
         data=payload,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
+        headers={"Content-Type": "application/json"},
         method="POST",
     )
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(req, timeout=180) as response:
+            with urllib.request.urlopen(req, timeout=600) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"].strip()
+            content = data.get("message", {}).get("content", "").strip()
+            if not content:
+                raise RuntimeError(f"Local model returned no content: {data}")
+            return content
         except Exception:
             if attempt == 2:
                 raise
             time.sleep(5 * (attempt + 1))
-    raise RuntimeError("Model request failed")
+    raise RuntimeError("Local model request failed")
 
 
 def add_sources(report: str, items: list[dict]) -> str:
@@ -175,7 +179,7 @@ def main() -> int:
     print(f"Collected {len(items)} research items")
     prior = load_recent_briefings(3)
     print(f"Loaded {prior.count('--- PRIOR BRIEFING:')} prior briefings for novelty comparison")
-    report = add_sources(call_github_model(build_context(items), prior), items)
+    report = add_sources(call_local_model(build_context(items), prior), items)
     date_str = dt.datetime.now(ZoneInfo("Australia/Sydney")).strftime("%Y-%m-%d")
     out_dir = os.path.join(REPO_ROOT, "briefings")
     os.makedirs(out_dir, exist_ok=True)
